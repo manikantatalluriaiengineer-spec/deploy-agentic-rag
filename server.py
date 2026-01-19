@@ -1,64 +1,94 @@
-# rename .env.example to .env and add the following:
-# SERPER_API_KEY=your_serper_api_key
-# OPENAI_API_KEY=your_openai_api_key
+# 100% Private Agentic RAG using Ollama (local LLM)
+# Simple FastAPI version - No API keys required!
 
 from crewai import Crew, Agent, Task, LLM
-import litserve as ls
-from crewai_tools import SerperDevTool
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+import uvicorn
 
-# If you'd like, you can use a local LLM as well through Ollama. Do this:
-# ollama pull qwen3 in the command line.
+# Use local Ollama model (using llama3 which is already installed)
+llm = LLM(model="ollama/llama3")
 
-# Uncomment the following line and also the llm=llm line in the Agents definitions.
-# llm = LLM(model="ollama/qwen3")
+# Initialize agents
+researcher_agent = Agent(
+    role="Research Specialist",
+    goal="Accurately research and understand the user's specific question, then provide detailed insights and facts about the topic",
+    backstory="You are an expert researcher with deep knowledge across many fields. You carefully analyze questions and provide accurate, factual information. You focus on understanding exactly what the user is asking and provide relevant information about that specific topic.",
+    verbose=True,
+    tools=[],  # 100% local (no API keys needed)
+    llm=llm,
+    allow_delegation=False
+)
 
-class AgenticRAGAPI(ls.LitAPI):
-    def setup(self, device):
-        researcher_agent = Agent(
-            role="Researcher",
-            goal="Research about the user's query and generate insights",
-            backstory="You are a helpful assistant that can answer questions about the document.",
-            verbose=True,
-            tools=[SerperDevTool()],
-            # llm=llm
+writer_agent = Agent(
+    role="Technical Writer",
+    goal="Write a clear, accurate, and comprehensive answer that directly addresses the user's question",
+    backstory="You are a skilled technical writer who creates clear, accurate explanations. You take research insights and synthesize them into well-structured answers that directly answer what the user asked. You ensure the answer is relevant to the specific question asked.",
+    verbose=True,
+    llm=llm,
+    allow_delegation=False
+)
+
+researcher_task = Task(
+    description="""Carefully analyze the user's question: "{query}"
+
+Your task is to:
+1. Understand exactly what the user is asking about
+2. Research and gather accurate information about that specific topic
+3. Provide detailed insights and facts related to the user's question
+4. Focus ONLY on the topic mentioned in the query - do not confuse it with other topics
+
+User's question: {query}""",
+    expected_output="A detailed research report with accurate facts and insights about the specific topic mentioned in the user's question",
+    agent=researcher_agent,
+)
+
+writer_task = Task(
+    description="""Using the research insights provided, write a comprehensive answer to the user's question: "{query}"
+
+Requirements:
+1. Directly answer the user's specific question
+2. Use the research insights to provide accurate information
+3. Ensure your answer is about the exact topic the user asked about
+4. Write clearly and comprehensively
+5. Do not confuse the topic with other unrelated subjects
+
+User's question: {query}""",
+    expected_output="A clear, accurate, and comprehensive answer that directly addresses the user's specific question",
+    agent=writer_agent,
+)
+
+crew = Crew(
+    agents=[researcher_agent, writer_agent],
+    tasks=[researcher_task, writer_task],
+    verbose=True,
+)
+
+# FastAPI app
+app = FastAPI()
+
+class QueryRequest(BaseModel):
+    query: str
+
+@app.post("/predict")
+async def predict(request: QueryRequest):
+    try:
+        result = crew.kickoff(inputs={"query": request.query})
+        return JSONResponse(content={"output": {"raw": str(result)}})
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
         )
 
-        writer_agent = Agent(
-            role="Writer",
-            goal="Use the available insights to write a concise and informative response to the user's query",
-            backstory="You are a helpful assistant that can write a report about the user's query",
-            verbose=True,
-            # llm=llm
-        )
-        
-        researcher_task = Task(
-            description="Research about the user's query and generate insights: {query}",
-            expected_output="A concise and informative report about the user's query",
-            agent=researcher_agent,
-        )
-
-        writer_task = Task(
-            description="Use the available insights to write a concise and informative response to the user's query: {query}",
-            expected_output="A concise and informative response to the user's query",
-            agent=writer_agent,
-        )
-        
-        self.crew = Crew(
-            agents=[researcher_agent, writer_agent],
-            tasks=[researcher_task, writer_task],
-            verbose=True,
-        )
-
-    def decode_request(self, request):
-        return request["query"]
-
-    def predict(self, query):
-        return self.crew.kickoff(inputs={"query": query})
-
-    def encode_response(self, output):
-        return {"output": output}
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
 
 if __name__ == "__main__":
-    api = AgenticRAGAPI()
-    server = ls.LitServer(api)
-    server.run(port=8000)
+    print("🚀 Starting 100% Private Agentic RAG Server...")
+    print("📡 Server running on http://localhost:8000")
+    print("💡 Using local Ollama model: llama3")
+    print("🔒 No API keys required - 100% private!")
+    uvicorn.run(app, host="0.0.0.0", port=8000)

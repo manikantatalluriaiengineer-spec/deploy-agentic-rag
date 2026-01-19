@@ -4,7 +4,7 @@ import json
 import argparse
 import time
 # replace this URL with your exposed URL from the API builder. The URL looks like this
-SERVER_URL = 'http://0.0.0.0:8000'
+SERVER_URL = 'http://localhost:8000'
 
 def main():
     parser = argparse.ArgumentParser(description="Send a query to the LitServe server.")
